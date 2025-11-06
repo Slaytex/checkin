@@ -89,33 +89,189 @@ npm run dev
 ```
 
 This will start:
-- Backend server on http://localhost:3001
-- Frontend server on http://localhost:3000
+- Backend server on http://localhost:3003
+- Frontend server on http://localhost:3000 (Vite dev server)
 
 ## Production Deployment (Ubuntu + Nginx)
 
-1. **Build the application:**
+### Prerequisites
+- Ubuntu 20.04+ (or similar Linux distribution)
+- Node.js 18+ and npm installed
+- Nginx installed
+- Git installed
+
+### Step 1: Clone and Build on Development Machine
+
+1. **Clone the repository:**
    ```bash
-   chmod +x deploy.sh
-   ./deploy.sh
+   git clone <repository-url>
+   cd checkin
+   git checkout checkinv2  # or your desired branch
    ```
 
-2. **On your Ubuntu server:**
-   - Copy `frontend/dist` to `/var/www/checkin/frontend/`
-   - Copy `backend/dist`, `backend/package.json`, and `backend/data` to `/var/www/checkin/backend/`
-   - Install backend production dependencies: `cd /var/www/checkin/backend && npm install --production`
+2. **Install dependencies:**
+   ```bash
+   npm run install:all
+   ```
 
-3. **Configure Nginx:**
-   - Copy `nginx.conf` to `/etc/nginx/sites-available/checkin`
-   - Update `server_name` in nginx.conf with your domain or IP
-   - Create symlink: `sudo ln -s /etc/nginx/sites-available/checkin /etc/nginx/sites-enabled/`
-   - Test configuration: `sudo nginx -t`
-   - Reload nginx: `sudo systemctl reload nginx`
+3. **Build the frontend:**
+   ```bash
+   cd frontend
+   npm run build
+   cd ..
+   ```
 
-4. **Set up systemd service for backend:**
-   - Copy `backend/systemd.service` to `/etc/systemd/system/checkin-backend.service`
-   - Update paths in the service file if needed
-   - Enable and start: `sudo systemctl enable checkin-backend && sudo systemctl start checkin-backend`
+4. **Build the backend:**
+   ```bash
+   cd backend
+   npm run build
+   cd ..
+   ```
+
+### Step 2: Transfer Files to Server
+
+1. **Create deployment directory on server:**
+   ```bash
+   ssh user@your-server
+   sudo mkdir -p /var/www/checkin/{frontend,backend}
+   sudo chown -R $USER:$USER /var/www/checkin
+   ```
+
+2. **Transfer files (from your local machine):**
+   ```bash
+   # Transfer frontend build
+   scp -r frontend/dist/* user@your-server:/var/www/checkin/frontend/
+   
+   # Transfer backend files
+   scp -r backend/dist user@your-server:/var/www/checkin/backend/
+   scp backend/package.json user@your-server:/var/www/checkin/backend/
+   scp backend/package-lock.json user@your-server:/var/www/checkin/backend/
+   scp backend/drink_types.json user@your-server:/var/www/checkin/backend/
+   scp backend/tsconfig.json user@your-server:/var/www/checkin/backend/
+   
+   # Create data directory for SQLite database
+   ssh user@your-server "mkdir -p /var/www/checkin/backend/data"
+   ```
+
+### Step 3: Install Backend Dependencies on Server
+
+```bash
+ssh user@your-server
+cd /var/www/checkin/backend
+npm install --production
+```
+
+### Step 4: Configure Nginx
+
+1. **Copy nginx configuration:**
+   ```bash
+   sudo cp nginx.conf /etc/nginx/sites-available/checkin
+   ```
+
+2. **Edit the configuration:**
+   ```bash
+   sudo nano /etc/nginx/sites-available/checkin
+   ```
+   - Update `server_name` with your domain or IP address
+   - Verify `proxy_pass` points to `http://localhost:3003` (backend port)
+
+3. **Enable the site:**
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/checkin /etc/nginx/sites-enabled/
+   ```
+
+4. **Test and reload:**
+   ```bash
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+### Step 5: Set Up Systemd Service
+
+1. **Copy systemd service file:**
+   ```bash
+   sudo cp backend/systemd.service /etc/systemd/system/checkin-backend.service
+   ```
+
+2. **Edit the service file (if needed):**
+   ```bash
+   sudo nano /etc/systemd/system/checkin-backend.service
+   ```
+   - Verify `WorkingDirectory` is `/var/www/checkin/backend`
+   - Verify `ExecStart` points to the correct Node.js path
+   - Verify `Environment=PORT=3003` matches your backend port
+
+3. **Reload systemd and start the service:**
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable checkin-backend
+   sudo systemctl start checkin-backend
+   ```
+
+4. **Check service status:**
+   ```bash
+   sudo systemctl status checkin-backend
+   ```
+
+### Step 6: Set Permissions
+
+```bash
+sudo chown -R www-data:www-data /var/www/checkin
+sudo chmod -R 755 /var/www/checkin
+sudo chmod -R 775 /var/www/checkin/backend/data  # For SQLite database
+```
+
+### Step 7: Verify Deployment
+
+1. **Check backend is running:**
+   ```bash
+   curl http://localhost:3003/api/health
+   ```
+
+2. **Check nginx is serving frontend:**
+   ```bash
+   curl http://your-domain-or-ip/
+   ```
+
+3. **Check logs if issues:**
+   ```bash
+   # Backend logs
+   sudo journalctl -u checkin-backend -f
+   
+   # Nginx logs
+   sudo tail -f /var/log/nginx/error.log
+   ```
+
+### Important Notes
+
+- **Backend Port**: The backend runs on port **3003** by default
+- **Database**: SQLite database is stored in `/var/www/checkin/backend/data/checkin.db`
+- **Environment Variables**: Backend uses `PORT` environment variable (defaults to 3003)
+- **Firewall**: Ensure ports 80 (HTTP) and 443 (HTTPS if using SSL) are open
+- **SSL/HTTPS**: Consider setting up Let's Encrypt SSL certificate for production
+
+### Updating the Application
+
+1. **Pull latest changes:**
+   ```bash
+   cd /path/to/checkin
+   git pull
+   ```
+
+2. **Rebuild:**
+   ```bash
+   cd frontend && npm run build && cd ..
+   cd backend && npm run build && cd ..
+   ```
+
+3. **Transfer new files to server** (repeat Step 2)
+
+4. **Restart services:**
+   ```bash
+   ssh user@your-server
+   sudo systemctl restart checkin-backend
+   sudo systemctl reload nginx
+   ```
 
 ## Project Structure
 

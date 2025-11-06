@@ -32,6 +32,49 @@ router.get('/:date/points', (req, res) => {
   }
 });
 
+// Get total reserve points (accumulated unused points from Mon-Thu available for Fri-Sun)
+router.get('/reserve', (req, res) => {
+  try {
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const isWeekend = dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0; // Fri, Sat, Sun
+    
+    let totalReserve = 0;
+    
+    if (isWeekend) {
+      // Calculate accumulated points from Mon-Thu
+      const weekStart = startOfWeek(today, { weekStartsOn: 1 }); // Monday
+      for (let i = 0; i < 4; i++) {
+        const weekday = addDays(weekStart, i);
+        const weekdayStr = format(weekday, 'yyyy-MM-dd');
+        const weekdayData = db.prepare('SELECT * FROM days WHERE date = ?').get(weekdayStr);
+        
+        if (weekdayData) {
+          // Each day gives 1 base point, +1 if gym
+          const dayPoints = (weekdayData.went_to_gym as any) === 1 ? 2 : 1;
+          // Check if any drinks were checked off on this day
+          const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(weekdayData.id);
+          if (drinks.length === 0) {
+            // No drinks consumed, points accumulate to reserve
+            totalReserve += dayPoints;
+          } else {
+            // Some drinks consumed, calculate unused points
+            const usedPoints = drinks.reduce((sum: number, drink: any) => sum + (drink.points || 0), 0);
+            const unusedPoints = dayPoints - usedPoints;
+            if (unusedPoints > 0) {
+              totalReserve += unusedPoints;
+            }
+          }
+        }
+      }
+    }
+    
+    res.json({ totalReserve });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to calculate reserve points' });
+  }
+});
+
 // Check off a drink (spend points)
 router.post('/:date/check-off', (req, res) => {
   try {
@@ -118,33 +161,42 @@ function calculatePointsSummary(dateStr: string) {
   // Points earned today: 1 base point per day, +1 if went to gym (so 2 if gym, 1 if no gym)
   const earnedPoints = day ? ((day.went_to_gym as any) === 1 ? 2 : 1) : 0;
   
-  // Accumulated points from Mon-Thu (if today is Fri-Sun)
+  // Accumulated points from Mon-Thu (always calculate, but only available on Fri-Sun)
   let accumulatedPoints = 0;
   const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
   const isWeekend = dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0; // Fri, Sat, Sun
   
-  if (isWeekend) {
-    const weekStart = startOfWeek(date, { weekStartsOn: 1 }); // Monday
-    for (let i = 0; i < 4; i++) {
-      const weekday = addDays(weekStart, i);
-      const weekdayStr = format(weekday, 'yyyy-MM-dd');
-      const weekdayData = db.prepare('SELECT * FROM days WHERE date = ?').get(weekdayStr);
-      
-      if (weekdayData) {
-        // Each day gives 1 base point, +1 if gym
-        const dayPoints = (weekdayData.went_to_gym as any) === 1 ? 2 : 1;
-        // Check if any drinks were checked off on this day
-        const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(weekdayData.id);
-        if (drinks.length === 0) {
-          // No drinks consumed, points accumulate
-          accumulatedPoints += dayPoints;
+  // Always calculate accumulated points from Mon-Thu, regardless of current day
+  const weekStart = startOfWeek(date, { weekStartsOn: 1 }); // Monday
+  for (let i = 0; i < 4; i++) {
+    const weekday = addDays(weekStart, i);
+    const weekdayStr = format(weekday, 'yyyy-MM-dd');
+    const weekdayData = db.prepare('SELECT * FROM days WHERE date = ?').get(weekdayStr);
+    
+    if (weekdayData) {
+      // Each day gives 1 base point, +1 if gym
+      const dayPoints = (weekdayData.went_to_gym as any) === 1 ? 2 : 1;
+      // Check if any drinks were checked off on this day
+      const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(weekdayData.id);
+      if (drinks.length === 0) {
+        // No drinks consumed, points accumulate
+        accumulatedPoints += dayPoints;
+      } else {
+        // Some drinks consumed, calculate unused points
+        const usedPoints = drinks.reduce((sum: number, drink: any) => sum + (drink.points || 0), 0);
+        const unusedPoints = dayPoints - usedPoints;
+        if (unusedPoints > 0) {
+          accumulatedPoints += unusedPoints;
         }
       }
     }
   }
   
-  // Total available points
-  const totalAvailablePoints = earnedPoints + accumulatedPoints;
+  // Only add accumulated points to total available if it's Fri-Sun
+  // But we still show the accumulated points value in the UI
+  
+  // Total available points (accumulated only counts if it's Fri-Sun)
+  const totalAvailablePoints = earnedPoints + (isWeekend ? accumulatedPoints : 0);
   
   // Points used (sum of checked-off drinks)
   let usedPoints = 0;

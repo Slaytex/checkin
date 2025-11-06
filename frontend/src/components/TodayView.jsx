@@ -106,12 +106,6 @@ function TodayView({ day, drinkTypes, pointsSummary, onDrinkCheckOff, onDrinkUnc
               <span>Earned Today:</span>
               <span style={{ fontWeight: 500, color: '#ffffff' }}>{pointsSummary.earnedPoints}</span>
             </div>
-            {pointsSummary.accumulatedPoints > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cccccc' }}>
-                <span>Accumulated (Mon-Thu):</span>
-                <span style={{ fontWeight: 500, color: '#ffffff' }}>{pointsSummary.accumulatedPoints}</span>
-              </div>
-            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cccccc' }}>
               <span>Total Available:</span>
               <span style={{ fontWeight: 500, color: '#ffffff' }}>{pointsSummary.totalAvailablePoints}</span>

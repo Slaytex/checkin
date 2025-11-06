@@ -12,6 +12,7 @@ function App() {
   const [cheatCount, setCheatCount] = useState(0);
   const [goodDays, setGoodDays] = useState(0);
   const [monthlyStats, setMonthlyStats] = useState({ totalDrinkPoints: 0, totalGymVisits: 0 });
+  const [reservePoints, setReservePoints] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showCheatDialog, setShowCheatDialog] = useState(false);
 
@@ -32,7 +33,8 @@ function App() {
         await Promise.all([
           fetchDay(todayData.date),
           fetchCheatData(),
-          fetchMonthlyStats()
+          fetchMonthlyStats(),
+          fetchReservePoints()
         ]);
       } catch (error) {
         console.error('Failed to fetch initial data:', error);
@@ -87,6 +89,16 @@ function App() {
     }
   };
 
+  const fetchReservePoints = async () => {
+    try {
+      const response = await fetch('/api/drinks/reserve');
+      const data = await response.json();
+      setReservePoints(data.totalReserve || 0);
+    } catch (error) {
+      console.error('Failed to fetch reserve points:', error);
+    }
+  };
+
   const handleGymUpdate = async (wentToGym) => {
     try {
       await fetch(`/api/days/${today}/gym`, {
@@ -96,7 +108,8 @@ function App() {
       });
       await Promise.all([
         fetchDay(today),
-        fetchMonthlyStats()
+        fetchMonthlyStats(),
+        fetchReservePoints()
       ]);
     } catch (error) {
       console.error('Failed to update gym status:', error);
@@ -113,7 +126,8 @@ function App() {
       await Promise.all([
         fetchDay(today),
         fetchCheatData(),
-        fetchMonthlyStats()
+        fetchMonthlyStats(),
+        fetchReservePoints()
       ]);
     } catch (error) {
       console.error('Failed to check off drink:', error);
@@ -130,7 +144,8 @@ function App() {
       await Promise.all([
         fetchDay(today),
         fetchCheatData(),
-        fetchMonthlyStats()
+        fetchMonthlyStats(),
+        fetchReservePoints()
       ]);
     } catch (error) {
       console.error('Failed to uncheck drink:', error);
@@ -164,7 +179,8 @@ function App() {
       setShowCheatDialog(false);
       await Promise.all([
         fetchCheatData(),
-        fetchMonthlyStats()
+        fetchMonthlyStats(),
+        fetchReservePoints()
       ]);
     } catch (error) {
       console.error('Failed to record cheat:', error);
@@ -259,9 +275,39 @@ function App() {
                 <div style={{ fontSize: '14px', color: '#999', marginBottom: '5px', fontFamily: 'Montserrat, sans-serif' }}>
                   This Month
                 </div>
-                <div style={{ fontSize: '18px', color: '#ffffff', fontFamily: 'Montserrat, sans-serif', fontWeight: 500 }}>
-                  Drink Points: {monthlyStats.totalDrinkPoints}
-                </div>
+                {pointsSummary && (
+                  <>
+                    {pointsSummary.accumulatedPoints > 0 ? (
+                      <div style={{ 
+                        fontSize: '18px', 
+                        color: '#4caf50', 
+                        fontFamily: 'Montserrat, sans-serif', 
+                        fontWeight: 500 
+                      }}>
+                        Drink credit: {pointsSummary.accumulatedPoints}
+                      </div>
+                    ) : (
+                      <div style={{ 
+                        fontSize: '18px', 
+                        color: '#ffffff', 
+                        fontFamily: 'Montserrat, sans-serif', 
+                        fontWeight: 500 
+                      }}>
+                        Drink credit: 0
+                      </div>
+                    )}
+                    {pointsSummary.remainingPoints < 0 && (
+                      <div style={{ 
+                        fontSize: '18px', 
+                        color: '#f44336', 
+                        fontFamily: 'Montserrat, sans-serif', 
+                        fontWeight: 700 
+                      }}>
+                        Drink debt: {Math.abs(pointsSummary.remainingPoints)}
+                      </div>
+                    )}
+                  </>
+                )}
                 <div style={{ fontSize: '18px', color: '#ffffff', fontFamily: 'Montserrat, sans-serif', fontWeight: 500 }}>
                   Gym Visits: {monthlyStats.totalGymVisits}
                 </div>

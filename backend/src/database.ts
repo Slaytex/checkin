@@ -36,12 +36,27 @@ export function initDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       day_id INTEGER NOT NULL,
       drink_type TEXT NOT NULL,
-      consumed INTEGER NOT NULL DEFAULT 0,
+      points INTEGER NOT NULL DEFAULT 1,
       checked_off INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (day_id) REFERENCES days(id) ON DELETE CASCADE
     )
   `);
+  
+  // Add points column to existing databases (migration)
+  try {
+    db.exec(`ALTER TABLE drinks ADD COLUMN points INTEGER NOT NULL DEFAULT 1`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  
+  // Add updated_at column to existing databases (migration)
+  try {
+    db.exec(`ALTER TABLE drinks ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
 
   // Create meals table
   db.exec(`
@@ -55,24 +70,38 @@ export function initDatabase() {
     )
   `);
 
-  // Create cheat_log table
+  // Create cheats table (replaces cheat_log)
   db.exec(`
-    CREATE TABLE IF NOT EXISTS cheat_log (
+    CREATE TABLE IF NOT EXISTS cheats (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
-      week_start TEXT NOT NULL,
+      drink_type TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (date) REFERENCES days(date)
     )
   `);
+  
+  // Migration: Create cheats table if cheat_log exists
+  try {
+    const cheatLogExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='cheat_log'`).get();
+    if (cheatLogExists) {
+      // Migrate data from cheat_log to cheats
+      db.exec(`
+        INSERT INTO cheats (date, drink_type, created_at)
+        SELECT date, 'Beer', created_at FROM cheat_log
+        WHERE NOT EXISTS (SELECT 1 FROM cheats WHERE cheats.date = cheat_log.date AND cheats.created_at = cheat_log.created_at)
+      `);
+    }
+  } catch (e) {
+    // Migration failed, continue
+  }
 
   // Create indexes
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_days_date ON days(date);
     CREATE INDEX IF NOT EXISTS idx_drinks_day_id ON drinks(day_id);
     CREATE INDEX IF NOT EXISTS idx_meals_day_id ON meals(day_id);
-    CREATE INDEX IF NOT EXISTS idx_cheat_log_date ON cheat_log(date);
-    CREATE INDEX IF NOT EXISTS idx_cheat_log_week ON cheat_log(week_start);
+    CREATE INDEX IF NOT EXISTS idx_cheats_date ON cheats(date);
   `);
 
   console.log('Database initialized');

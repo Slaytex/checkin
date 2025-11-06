@@ -1,11 +1,39 @@
 import { Router } from 'express';
 import { db } from '../database.js';
-import { format, parseISO, addDays, startOfWeek } from 'date-fns';
+import { format, parseISO, startOfWeek, addDays } from 'date-fns';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const router = Router();
 
-// Check off a drink
-router.post('/:date/check-off', async (req, res) => {
+// Get drink types configuration
+router.get('/types', (req, res) => {
+  try {
+    const drinkTypesPath = join(__dirname, '../../drink_types.json');
+    const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8'));
+    res.json(drinkTypes);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load drink types' });
+  }
+});
+
+// Get points summary for a date
+router.get('/:date/points', (req, res) => {
+  try {
+    const { date } = req.params;
+    const pointsSummary = calculatePointsSummary(date);
+    res.json(pointsSummary);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to calculate points' });
+  }
+});
+
+// Check off a drink (spend points)
+router.post('/:date/check-off', (req, res) => {
   try {
     const { date } = req.params;
     const { drinkId } = req.body;
@@ -16,18 +44,15 @@ router.post('/:date/check-off', async (req, res) => {
       return res.status(404).json({ error: 'Drink not found' });
     }
 
-    // Get the day
-    const day = db.prepare('SELECT * FROM days WHERE id = ?').get(drink.day_id);
-    if (!day) {
-      return res.status(404).json({ error: 'Day not found' });
+    // Check if user has enough points
+    const pointsSummary = calculatePointsSummary(date);
+    if (pointsSummary.remainingPoints < (drink.points as number)) {
+      return res.status(400).json({ error: 'Not enough points' });
     }
 
     // Check off the drink
     const update = db.prepare('UPDATE drinks SET checked_off = 1 WHERE id = ?');
     update.run(drinkId);
-
-    // Recalculate and redistribute drinks
-    redistributeDrinks(date);
 
     res.json({ success: true });
   } catch (error) {
@@ -35,17 +60,15 @@ router.post('/:date/check-off', async (req, res) => {
   }
 });
 
-// Uncheck a drink
-router.post('/:date/uncheck', async (req, res) => {
+// Uncheck a drink (refund points)
+router.post('/:date/uncheck', (req, res) => {
   try {
     const { date } = req.params;
     const { drinkId } = req.body;
 
+    // Uncheck the drink
     const update = db.prepare('UPDATE drinks SET checked_off = 0 WHERE id = ?');
     update.run(drinkId);
-
-    // Recalculate and redistribute drinks
-    redistributeDrinks(date);
 
     res.json({ success: true });
   } catch (error) {
@@ -59,187 +82,87 @@ router.put('/:drinkId', (req, res) => {
     const { drinkId } = req.params;
     const { drink_type } = req.body;
 
-    const update = db.prepare('UPDATE drinks SET drink_type = ? WHERE id = ?');
-    update.run(drink_type, drinkId);
+    if (!drink_type) {
+      return res.status(400).json({ error: 'drink_type is required' });
+    }
+
+    // Get point value for drink type
+    const drinkTypesPath = join(__dirname, '../../drink_types.json');
+    const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8'));
+    const points = drinkTypes[drink_type] || 1;
+
+    const drinkIdNum = parseInt(drinkId, 10);
+    if (isNaN(drinkIdNum)) {
+      return res.status(400).json({ error: 'Invalid drink ID' });
+    }
+
+    const update = db.prepare('UPDATE drinks SET drink_type = ?, points = ? WHERE id = ?');
+    const result = update.run(drink_type, points, drinkIdNum);
+    
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Drink not found' });
+    }
 
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update drink' });
+    console.error('Error updating drink:', error);
+    res.status(500).json({ error: 'Failed to update drink', details: error.message });
   }
 });
 
-function redistributeDrinks(currentDate: string) {
-  const date = parseISO(currentDate);
-  const startOfWeekDate = startOfWeek(date, { weekStartsOn: 1 }); // Monday
-  const mondayStr = format(startOfWeekDate, 'yyyy-MM-dd');
+// Calculate points summary for a date
+function calculatePointsSummary(dateStr: string) {
+  const date = parseISO(dateStr);
+  const day = db.prepare('SELECT * FROM days WHERE date = ?').get(dateStr);
   
-  // Process days from Monday to Thursday in order
-  for (let i = 0; i < 4; i++) {
-    const dayDate = addDays(startOfWeekDate, i);
-    const dayDateStr = format(dayDate, 'yyyy-MM-dd');
-    
-    // Get or create the day
-    let day = db.prepare('SELECT * FROM days WHERE date = ?').get(dayDateStr);
-    if (!day) {
-      const insert = db.prepare('INSERT INTO days (date, max_drinks, went_to_gym) VALUES (?, 2, 0)');
-      insert.run(dayDateStr);
-      day = db.prepare('SELECT * FROM days WHERE date = ?').get(dayDateStr);
-    }
-    
-    const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? ORDER BY id ASC').all(day.id);
-    const wentToGym = (day.went_to_gym as any) === 1;
-    
-    // Available drinks: 2 if gym, 1 if no gym
-    const availableDrinks = wentToGym ? 2 : 1;
-    const checkedOff = drinks.filter(d => d.checked_off === 1).length;
-    
-    // Only redistribute unused drinks if they went to gym
-    // If gym: unused = available - checked (2 - checked)
-    // If no gym: unused drinks don't move forward
-    if (wentToGym) {
-      const unusedDrinks = Math.max(0, availableDrinks - checkedOff);
+  // Points earned today: 1 base point per day, +1 if went to gym (so 2 if gym, 1 if no gym)
+  const earnedPoints = day ? ((day.went_to_gym as any) === 1 ? 2 : 1) : 0;
+  
+  // Accumulated points from Mon-Thu (if today is Fri-Sun)
+  let accumulatedPoints = 0;
+  const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
+  const isWeekend = dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0; // Fri, Sat, Sun
+  
+  if (isWeekend) {
+    const weekStart = startOfWeek(date, { weekStartsOn: 1 }); // Monday
+    for (let i = 0; i < 4; i++) {
+      const weekday = addDays(weekStart, i);
+      const weekdayStr = format(weekday, 'yyyy-MM-dd');
+      const weekdayData = db.prepare('SELECT * FROM days WHERE date = ?').get(weekdayStr);
       
-      // If there are unused drinks from gym day, move them to the next day
-      if (unusedDrinks > 0 && i < 3) { // Only push forward if not Thursday
-        const nextDayDate = addDays(dayDate, 1);
-        const nextDayDateStr = format(nextDayDate, 'yyyy-MM-dd');
-        
-        // Move unused drinks to next day
-        pushDrinksToNextDay(dayDateStr, nextDayDateStr, unusedDrinks);
-      }
-    }
-    // If didn't go to gym, unused drinks are lost (don't redistribute)
-  }
-  
-  // After processing Monday-Thursday, handle any remaining drinks that need to go to weekend
-  handleWeekendRedistribution(mondayStr);
-}
-
-function pushDrinksToNextDay(fromDate: string, toDate: string, count: number) {
-  if (count <= 0) return;
-  
-  // Get target day
-  let targetDay = db.prepare('SELECT * FROM days WHERE date = ?').get(toDate);
-  if (!targetDay) {
-    const parsedDate = parseISO(toDate);
-    const dayOfWeek = parsedDate.getDay();
-    const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 4;
-    const defaultMaxDrinks = isWeekday ? 2 : 0;
-    const insert = db.prepare('INSERT INTO days (date, max_drinks, went_to_gym) VALUES (?, ?, 0)');
-    insert.run(toDate, defaultMaxDrinks);
-    targetDay = db.prepare('SELECT * FROM days WHERE date = ?').get(toDate);
-  }
-  
-  // Get source day
-  const sourceDay = db.prepare('SELECT * FROM days WHERE date = ?').get(fromDate);
-  if (!sourceDay) return;
-  
-  // Get unchecked drinks from source day
-  const uncheckedDrinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 0 ORDER BY id ASC LIMIT ?').all(sourceDay.id, count);
-  
-  // Delete the drinks we're moving from source day
-  const deleteDrink = db.prepare('DELETE FROM drinks WHERE id = ?');
-  uncheckedDrinks.forEach((drink: any) => {
-    deleteDrink.run(drink.id);
-  });
-  
-  // Get current drinks in target day
-  const targetDrinks = db.prepare('SELECT COUNT(*) as count FROM drinks WHERE day_id = ?').get(targetDay.id);
-  const targetCount = (targetDrinks as any).count;
-  const targetMax = targetDay.max_drinks || 0;
-  
-  // Add all drinks to target day (we can exceed max_drinks)
-  const insertDrink = db.prepare('INSERT INTO drinks (day_id, drink_type) VALUES (?, ?)');
-  for (let i = 0; i < count; i++) {
-    insertDrink.run(targetDay.id, 'Beer');
-  }
-  
-  // If target day now exceeds max_drinks, push the excess forward
-  const newTargetCount = targetCount + count;
-  if (targetMax > 0 && newTargetCount > targetMax) {
-    const excess = newTargetCount - targetMax;
-    // Remove excess drinks (keeping the ones we just added, removing older ones)
-    const excessDrinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 0 ORDER BY id ASC LIMIT ?').all(targetDay.id, excess);
-    const deleteDrink = db.prepare('DELETE FROM drinks WHERE id = ?');
-    excessDrinks.forEach((drink: any) => {
-      deleteDrink.run(drink.id);
-    });
-    
-    // Push excess to next day
-    const nextDate = format(addDays(parseISO(toDate), 1), 'yyyy-MM-dd');
-    pushDrinksToNextDay(toDate, nextDate, excess);
-  }
-}
-
-function handleWeekendRedistribution(mondayStr: string) {
-  const startOfWeekDate = parseISO(mondayStr);
-  const friday = addDays(startOfWeekDate, 4);
-  const saturday = addDays(startOfWeekDate, 5);
-  const sunday = addDays(startOfWeekDate, 6);
-  const thursdayStr = format(addDays(startOfWeekDate, 3), 'yyyy-MM-dd');
-  
-  // Collect all unclaimed drinks from Monday-Thursday that exceed max_drinks
-  let totalExcess = 0;
-  
-  for (let i = 0; i < 4; i++) {
-    const dayDate = addDays(startOfWeekDate, i);
-    const dayDateStr = format(dayDate, 'yyyy-MM-dd');
-    
-    const day = db.prepare('SELECT * FROM days WHERE date = ?').get(dayDateStr);
-    if (!day) continue;
-    
-    const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 0').all(day.id);
-    const maxDrinks = day.max_drinks || 0;
-    
-    // If we have more unchecked drinks than max, collect the excess
-    if (drinks.length > maxDrinks) {
-      const excess = drinks.length - maxDrinks;
-      const excessDrinks = drinks.slice(maxDrinks);
-      
-      // Delete excess drinks
-      const deleteDrink = db.prepare('DELETE FROM drinks WHERE id = ?');
-      excessDrinks.forEach((drink: any) => {
-        deleteDrink.run(drink.id);
-      });
-      
-      totalExcess += excess;
-    }
-  }
-  
-  // Distribute excess drinks across Friday, Saturday, Sunday
-  if (totalExcess > 0) {
-    const weekendDays = [
-      { date: format(friday, 'yyyy-MM-dd'), name: 'Friday' },
-      { date: format(saturday, 'yyyy-MM-dd'), name: 'Saturday' },
-      { date: format(sunday, 'yyyy-MM-dd'), name: 'Sunday' }
-    ];
-    
-    // Split evenly, with remainder going to earlier days
-    const baseAmount = Math.floor(totalExcess / 3);
-    const remainder = totalExcess % 3;
-    
-    for (let i = 0; i < 3; i++) {
-      const toAdd = baseAmount + (i < remainder ? 1 : 0);
-      if (toAdd > 0) {
-        const weekendDay = weekendDays[i];
-        
-        // Get or create the day
-        let day = db.prepare('SELECT * FROM days WHERE date = ?').get(weekendDay.date);
-        if (!day) {
-          const insert = db.prepare('INSERT INTO days (date, max_drinks) VALUES (?, 0)');
-          insert.run(weekendDay.date);
-          day = db.prepare('SELECT * FROM days WHERE date = ?').get(weekendDay.date);
-        }
-        
-        // Add drinks
-        const insertDrink = db.prepare('INSERT INTO drinks (day_id, drink_type) VALUES (?, ?)');
-        for (let j = 0; j < toAdd; j++) {
-          insertDrink.run(day.id, 'Beer');
+      if (weekdayData) {
+        // Each day gives 1 base point, +1 if gym
+        const dayPoints = (weekdayData.went_to_gym as any) === 1 ? 2 : 1;
+        // Check if any drinks were checked off on this day
+        const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(weekdayData.id);
+        if (drinks.length === 0) {
+          // No drinks consumed, points accumulate
+          accumulatedPoints += dayPoints;
         }
       }
     }
   }
+  
+  // Total available points
+  const totalAvailablePoints = earnedPoints + accumulatedPoints;
+  
+  // Points used (sum of checked-off drinks)
+  let usedPoints = 0;
+  if (day) {
+    const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(day.id);
+    usedPoints = drinks.reduce((sum: number, drink: any) => sum + (drink.points || 0), 0);
+  }
+  
+  // Remaining points
+  const remainingPoints = totalAvailablePoints - usedPoints;
+  
+  return {
+    earnedPoints,
+    accumulatedPoints,
+    totalAvailablePoints,
+    usedPoints,
+    remainingPoints
+  };
 }
 
 export { router as drinksRouter };
-

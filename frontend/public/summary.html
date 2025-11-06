@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monthly Summary - CheckIn</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:,">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 32px;
+            margin-bottom: 30px;
+            font-weight: 600;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        .stat-label {
+            font-size: 14px;
+            color: #999;
+            margin-bottom: 10px;
+        }
+        .stat-value {
+            font-size: 32px;
+            font-weight: 600;
+            color: #ffffff;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Monthly Summary</h1>
+        <div id="summary-content" class="loading">Loading...</div>
+    </div>
+
+    <script type="module">
+        const urlParams = new URLSearchParams(window.location.search);
+        const year = urlParams.get('year') || new Date().getFullYear();
+        const month = urlParams.get('month') || (new Date().getMonth() + 1);
+
+        async function loadSummary() {
+            try {
+                const response = await fetch(`/api/cheats/monthly/${year}/${month}`);
+                const data = await response.json();
+                
+                const content = document.getElementById('summary-content');
+                content.className = '';
+                content.innerHTML = `
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Drink Points</div>
+                            <div class="stat-value">${data.totalDrinkPoints || 0}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Gym Visits</div>
+                            <div class="stat-value">${data.totalGymVisits || 0}</div>
+                        </div>
+                    </div>
+                    <p style="color: #999; margin-top: 20px;">
+                        Month: ${month}/${year}
+                    </p>
+                `;
+            } catch (error) {
+                document.getElementById('summary-content').innerHTML = 
+                    '<p style="color: #f44336;">Failed to load summary data.</p>';
+            }
+        }
+
+        loadSummary();
+    </script>
+</body>
+</html>
+

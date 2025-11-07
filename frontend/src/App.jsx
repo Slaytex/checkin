@@ -188,12 +188,14 @@ function App() {
     }
   };
 
-  // Calculate background red intensity
+  // Calculate effective cheat count (good days reduce cheats)
   const maxCheats = 3;
+  const effectiveCheatCount = Math.max(0, cheatCount - goodDays);
+
   const baseOpacity = cheatCount >= maxCheats ? 0.3 : 0;
   const reducedOpacity = Math.max(0, baseOpacity - (goodDays * 0.03));
-  const backgroundColor = reducedOpacity > 0 
-    ? `rgba(211, 47, 47, ${reducedOpacity})` 
+  const backgroundColor = reducedOpacity > 0
+    ? `rgba(211, 47, 47, ${reducedOpacity})`
     : 'transparent';
 
   const openMonthlySummary = (e) => {
@@ -239,7 +241,7 @@ function App() {
         transition: 'background 0.5s ease',
       }} />
       
-      <CheatMeter cheatCount={cheatCount} maxCheats={3} />
+      <CheatMeter cheatCount={effectiveCheatCount} maxCheats={3} />
       
       <div style={{ position: 'relative', zIndex: 2 }}>
         <header style={{
@@ -251,15 +253,15 @@ function App() {
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
             <div>
-              <h1 style={{ 
-                fontSize: '32px', 
-                marginBottom: '10px',
-                color: '#ffffff',
-                fontFamily: 'Montserrat, sans-serif',
-                fontWeight: 600,
-              }}>
-                CheckIn
-              </h1>
+              <img
+                src="/checkin-logo.svg"
+                alt="CheckIn"
+                style={{
+                  height: '60px',
+                  width: 'auto',
+                  marginBottom: '10px'
+                }}
+              />
               <p style={{ color: '#cccccc', marginBottom: '15px', fontFamily: 'Montserrat, sans-serif' }}>
                 Track your gym visits and drinks
               </p>

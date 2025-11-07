@@ -2,6 +2,7 @@
   "Beer": 1,
   "Wine": 1,
   "Cocktail": 2,
+  "Premium Cocktail": 3,
   "Shot": 1
 }
 

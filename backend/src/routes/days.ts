@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../database.js';
+import { db, DayRow } from '../database.js';
 import { format, parseISO } from 'date-fns';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -24,24 +24,24 @@ router.get('/today', (req, res) => {
 router.get('/:date', (req, res) => {
   try {
     const { date } = req.params;
-    let day = db.prepare('SELECT * FROM days WHERE date = ?').get(date);
+    let day = db.prepare('SELECT * FROM days WHERE date = ?').get(date) as DayRow | undefined;
 
     if (!day) {
       // Create a new day
       const insert = db.prepare('INSERT INTO days (date, went_to_gym) VALUES (?, 0)');
       insert.run(date);
-      day = db.prepare('SELECT * FROM days WHERE date = ?').get(date);
+      day = db.prepare('SELECT * FROM days WHERE date = ?').get(date) as DayRow;
     }
 
     // Ensure drink slots exist based on available points
     // 1 base point per day, +1 if gym (so 2 if gym, 1 if no gym)
-    const availablePoints = (day.went_to_gym as any) === 1 ? 2 : 1;
+    const availablePoints = day.went_to_gym === 1 ? 2 : 1;
     const existingDrinks = db.prepare('SELECT * FROM drinks WHERE day_id = ?').all(day.id);
     
     if (existingDrinks.length === 0) {
       // Create drink slots
       const drinkTypesPath = join(__dirname, '../../drink_types.json');
-      const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8'));
+      const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8')) as Record<string, number>;
       const defaultPoints = drinkTypes['Beer'] || 1;
       
       const insertDrink = db.prepare('INSERT INTO drinks (day_id, drink_type, points) VALUES (?, ?, ?)');
@@ -69,27 +69,27 @@ router.put('/:date/gym', (req, res) => {
     const { went_to_gym } = req.body;
 
     // Get or create day
-    let day = db.prepare('SELECT * FROM days WHERE date = ?').get(date);
+    let day = db.prepare('SELECT * FROM days WHERE date = ?').get(date) as DayRow | undefined;
     if (!day) {
       const insert = db.prepare('INSERT INTO days (date, went_to_gym) VALUES (?, ?)');
       insert.run(date, went_to_gym ? 1 : 0);
-      day = db.prepare('SELECT * FROM days WHERE date = ?').get(date);
+      day = db.prepare('SELECT * FROM days WHERE date = ?').get(date) as DayRow;
     } else {
       const update = db.prepare('UPDATE days SET went_to_gym = ?, updated_at = CURRENT_TIMESTAMP WHERE date = ?');
       update.run(went_to_gym ? 1 : 0, date);
-      day = db.prepare('SELECT * FROM days WHERE date = ?').get(date);
+      day = db.prepare('SELECT * FROM days WHERE date = ?').get(date) as DayRow;
     }
     
     // Create drink slots based on available points
     // 1 base point per day, +1 if gym (so 2 if gym, 1 if no gym)
     const availablePoints = went_to_gym ? 2 : 1;
-    const existingDrinks = db.prepare('SELECT * FROM drinks WHERE day_id = ?').all(day.id);
-    const checkedDrinks = existingDrinks.filter((d: any) => d.checked_off === 1);
-    const uncheckedDrinks = existingDrinks.filter((d: any) => d.checked_off === 0);
+    const existingDrinks = db.prepare('SELECT * FROM drinks WHERE day_id = ?').all(day.id) as Array<{ id: number; checked_off: number }>;
+    const checkedDrinks = existingDrinks.filter((d) => d.checked_off === 1);
+    const uncheckedDrinks = existingDrinks.filter((d) => d.checked_off === 0);
     
     // Load drink types to get default point values
     const drinkTypesPath = join(__dirname, '../../drink_types.json');
-    const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8'));
+    const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8')) as Record<string, number>;
     const defaultPoints = drinkTypes['Beer'] || 1;
     
     // Calculate how many drink slots we need
@@ -108,7 +108,7 @@ router.put('/:date/gym', (req, res) => {
       // Remove extra unchecked drinks (keep checked ones)
       const toRemove = currentTotalCount - neededSlots;
       const deleteDrink = db.prepare('DELETE FROM drinks WHERE id = ?');
-      uncheckedDrinks.slice(0, toRemove).forEach((drink: any) => {
+      uncheckedDrinks.slice(0, toRemove).forEach((drink) => {
         deleteDrink.run(drink.id);
       });
     }

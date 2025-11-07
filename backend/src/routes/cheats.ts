@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../database.js';
+import { db, DayRow } from '../database.js';
 import { format, parseISO, startOfWeek, addDays, getYear, getMonth } from 'date-fns';
 
 const router = Router();
@@ -36,12 +36,12 @@ router.get('/good-days/current', (req, res) => {
              (SELECT COUNT(*) FROM drinks WHERE day_id = d.id AND checked_off = 1) as checked_count
       FROM days d
       WHERE d.date >= ? AND d.date <= ?
-    `).all(weekStart, weekEnd);
+    `).all(weekStart, weekEnd) as Array<DayRow & { checked_count: number }>;
     
     let goodDays = 0;
     for (const day of days) {
-      const wentToGym = (day.went_to_gym as any) === 1;
-      const checkedCount = (day as any).checked_count || 0;
+      const wentToGym = day.went_to_gym === 1;
+      const checkedCount = day.checked_count || 0;
       
       if (wentToGym && checkedCount === 0) {
         goodDays++;

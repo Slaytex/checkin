@@ -10,6 +10,41 @@ const dbPath = join(__dirname, '../data', 'checkin.db');
 
 export const db = new Database(dbPath);
 
+// Type definitions for database rows
+export interface DayRow {
+  id: number;
+  date: string;
+  max_drinks: number;
+  went_to_gym: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DrinkRow {
+  id: number;
+  day_id: number;
+  drink_type: string;
+  points: number;
+  checked_off: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MealRow {
+  id: number;
+  day_id: number;
+  meal_type: string;
+  meal_name: string;
+  created_at: string;
+}
+
+export interface CheatRow {
+  id: number;
+  date: string;
+  drink_type: string;
+  created_at: string;
+}
+
 export function initDatabase() {
   // Create days table
   db.exec(`

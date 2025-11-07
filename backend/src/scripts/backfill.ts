@@ -1,4 +1,4 @@
-import { db } from '../database.js';
+import { db, DayRow } from '../database.js';
 import { format, parseISO } from 'date-fns';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -17,19 +17,19 @@ const historicalData = [
 ];
 
 const drinkTypesPath = join(__dirname, '../../drink_types.json');
-const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8'));
+const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8')) as Record<string, number>;
 
 for (const data of historicalData) {
   // Get or create day
-  let day = db.prepare('SELECT * FROM days WHERE date = ?').get(data.date);
+  let day = db.prepare('SELECT * FROM days WHERE date = ?').get(data.date) as DayRow | undefined;
   if (!day) {
     const insert = db.prepare('INSERT INTO days (date, went_to_gym) VALUES (?, ?)');
     insert.run(data.date, data.wentToGym ? 1 : 0);
-    day = db.prepare('SELECT * FROM days WHERE date = ?').get(data.date);
+    day = db.prepare('SELECT * FROM days WHERE date = ?').get(data.date) as DayRow;
   } else {
     const update = db.prepare('UPDATE days SET went_to_gym = ? WHERE date = ?');
     update.run(data.wentToGym ? 1 : 0, data.date);
-    day = db.prepare('SELECT * FROM days WHERE date = ?').get(data.date);
+    day = db.prepare('SELECT * FROM days WHERE date = ?').get(data.date) as DayRow;
   }
   
   // Clear existing drinks for this day

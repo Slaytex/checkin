@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../database.js';
+import { db, DayRow, DrinkRow } from '../database.js';
 import { format, parseISO, startOfWeek, addDays } from 'date-fns';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -14,7 +14,7 @@ const router = Router();
 router.get('/types', (req, res) => {
   try {
     const drinkTypesPath = join(__dirname, '../../drink_types.json');
-    const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8'));
+    const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8')) as Record<string, number>;
     res.json(drinkTypes);
   } catch (error) {
     res.status(500).json({ error: 'Failed to load drink types' });
@@ -47,19 +47,19 @@ router.get('/reserve', (req, res) => {
       for (let i = 0; i < 4; i++) {
         const weekday = addDays(weekStart, i);
         const weekdayStr = format(weekday, 'yyyy-MM-dd');
-        const weekdayData = db.prepare('SELECT * FROM days WHERE date = ?').get(weekdayStr);
+        const weekdayData = db.prepare('SELECT * FROM days WHERE date = ?').get(weekdayStr) as DayRow | undefined;
         
         if (weekdayData) {
           // Each day gives 1 base point, +1 if gym
-          const dayPoints = (weekdayData.went_to_gym as any) === 1 ? 2 : 1;
+          const dayPoints = weekdayData.went_to_gym === 1 ? 2 : 1;
           // Check if any drinks were checked off on this day
-          const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(weekdayData.id);
+          const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(weekdayData.id) as DrinkRow[];
           if (drinks.length === 0) {
             // No drinks consumed, points accumulate to reserve
             totalReserve += dayPoints;
           } else {
             // Some drinks consumed, calculate unused points
-            const usedPoints = drinks.reduce((sum: number, drink: any) => sum + (drink.points || 0), 0);
+            const usedPoints = drinks.reduce((sum: number, drink: DrinkRow) => sum + (drink.points || 0), 0);
             const unusedPoints = dayPoints - usedPoints;
             if (unusedPoints > 0) {
               totalReserve += unusedPoints;
@@ -82,14 +82,14 @@ router.post('/:date/check-off', (req, res) => {
     const { drinkId } = req.body;
 
     // Get the drink
-    const drink = db.prepare('SELECT * FROM drinks WHERE id = ?').get(drinkId);
+    const drink = db.prepare('SELECT * FROM drinks WHERE id = ?').get(drinkId) as DrinkRow | undefined;
     if (!drink) {
       return res.status(404).json({ error: 'Drink not found' });
     }
 
     // Check if user has enough points
     const pointsSummary = calculatePointsSummary(date);
-    if (pointsSummary.remainingPoints < (drink.points as number)) {
+    if (pointsSummary.remainingPoints < drink.points) {
       return res.status(400).json({ error: 'Not enough points' });
     }
 
@@ -131,7 +131,7 @@ router.put('/:drinkId', (req, res) => {
 
     // Get point value for drink type
     const drinkTypesPath = join(__dirname, '../../drink_types.json');
-    const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8'));
+    const drinkTypes = JSON.parse(readFileSync(drinkTypesPath, 'utf-8')) as Record<string, number>;
     const points = drinkTypes[drink_type] || 1;
 
     const drinkIdNum = parseInt(drinkId, 10);
@@ -148,18 +148,19 @@ router.put('/:drinkId', (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error updating drink:', error);
-    res.status(500).json({ error: 'Failed to update drink', details: error.message });
+    res.status(500).json({ error: 'Failed to update drink', details: errorMessage });
   }
 });
 
 // Calculate points summary for a date
 function calculatePointsSummary(dateStr: string) {
   const date = parseISO(dateStr);
-  const day = db.prepare('SELECT * FROM days WHERE date = ?').get(dateStr);
+  const day = db.prepare('SELECT * FROM days WHERE date = ?').get(dateStr) as DayRow | undefined;
   
   // Points earned today: 1 base point per day, +1 if went to gym (so 2 if gym, 1 if no gym)
-  const earnedPoints = day ? ((day.went_to_gym as any) === 1 ? 2 : 1) : 0;
+  const earnedPoints = day ? (day.went_to_gym === 1 ? 2 : 1) : 0;
   
   // Accumulated points from Mon-Thu (always calculate, but only available on Fri-Sun)
   let accumulatedPoints = 0;
@@ -171,19 +172,19 @@ function calculatePointsSummary(dateStr: string) {
   for (let i = 0; i < 4; i++) {
     const weekday = addDays(weekStart, i);
     const weekdayStr = format(weekday, 'yyyy-MM-dd');
-    const weekdayData = db.prepare('SELECT * FROM days WHERE date = ?').get(weekdayStr);
+    const weekdayData = db.prepare('SELECT * FROM days WHERE date = ?').get(weekdayStr) as DayRow | undefined;
     
     if (weekdayData) {
       // Each day gives 1 base point, +1 if gym
-      const dayPoints = (weekdayData.went_to_gym as any) === 1 ? 2 : 1;
+      const dayPoints = weekdayData.went_to_gym === 1 ? 2 : 1;
       // Check if any drinks were checked off on this day
-      const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(weekdayData.id);
+      const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(weekdayData.id) as DrinkRow[];
       if (drinks.length === 0) {
         // No drinks consumed, points accumulate
         accumulatedPoints += dayPoints;
       } else {
         // Some drinks consumed, calculate unused points
-        const usedPoints = drinks.reduce((sum: number, drink: any) => sum + (drink.points || 0), 0);
+        const usedPoints = drinks.reduce((sum: number, drink: DrinkRow) => sum + (drink.points || 0), 0);
         const unusedPoints = dayPoints - usedPoints;
         if (unusedPoints > 0) {
           accumulatedPoints += unusedPoints;
@@ -201,8 +202,8 @@ function calculatePointsSummary(dateStr: string) {
   // Points used (sum of checked-off drinks)
   let usedPoints = 0;
   if (day) {
-    const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(day.id);
-    usedPoints = drinks.reduce((sum: number, drink: any) => sum + (drink.points || 0), 0);
+    const drinks = db.prepare('SELECT * FROM drinks WHERE day_id = ? AND checked_off = 1').all(day.id) as DrinkRow[];
+    usedPoints = drinks.reduce((sum: number, drink: DrinkRow) => sum + (drink.points || 0), 0);
   }
   
   // Remaining points
